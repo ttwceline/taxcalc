@@ -1,9 +1,8 @@
-# tax_calculator.py
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Malaysia Personal Income Tax Bracket 2024 (simplified for demo)
+# Malaysia personal income tax brackets (as of 2023)
 tax_brackets = [
     (5000, 0.00),
     (20000, 0.01),
@@ -20,41 +19,61 @@ tax_brackets = [
 
 def calculate_tax(income):
     tax = 0.0
-    previous_limit = 0.0
+    breakdown = []
+    previous_limit = 0
 
     for limit, rate in tax_brackets:
         if income > limit:
-            taxable_income = limit - previous_limit
+            taxable = limit - previous_limit
         else:
-            taxable_income = income - previous_limit
+            taxable = income - previous_limit
 
-        if taxable_income > 0:
-            tax += taxable_income * rate
+        if taxable > 0:
+            taxed = taxable * rate
+            breakdown.append({
+                "bracket": f"{int(previous_limit)} - {int(limit)}",
+                "rate": rate,
+                "taxable_income": taxable,
+                "taxed": taxed
+            })
+            tax += taxed
 
         if income <= limit:
             break
-
         previous_limit = limit
 
-    return tax
+    return tax, breakdown
 
 @app.route('/calculate_tax', methods=['POST'])
-def tax_endpoint():
+def tax_api():
     data = request.get_json()
-    income = data.get('income', 0)
 
-    try:
-        income = float(income)
-    except ValueError:
-        return jsonify({"error": "Invalid income value"}), 400
+    income = float(data.get('income', 0))
+    deductions = float(data.get('deductions', 0))
+    tax_credits = float(data.get('tax_credits', 0))
+    is_self_employed = bool(data.get('self_employed', False))
 
-    tax_amount = calculate_tax(income)
-    net_income = income - tax_amount
+    # Adjusted income = income - deductions - credits
+    adjusted_income = max(0, income - deductions - tax_credits)
+
+    # Calculate tax
+    tax, breakdown = calculate_tax(adjusted_income)
+
+    # Add 5% surcharge if self-employed
+    surcharge = 0
+    if is_self_employed:
+        surcharge = round(tax * 0.05, 2)
+        tax += surcharge
 
     return jsonify({
-        "income": income,
-        "tax_amount": round(tax_amount, 2),
-        "net_income": round(net_income, 2)
+        "original_income": income,
+        "deductions": deductions,
+        "tax_credits": tax_credits,
+        "adjusted_income": adjusted_income,
+        "tax_amount": round(tax, 2),
+        "surcharge_if_self_employed": surcharge,
+        "net_income": round(income - tax, 2),
+        "details": breakdown
     })
 
 if __name__ == "__main__":
